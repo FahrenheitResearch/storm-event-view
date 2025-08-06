@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Storm Events Database - NOAA Historical Archive</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8f9fa; }
+        
+        .loading {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9); color: white;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 9999;
+        }
+        .loading.hidden { display: none; }
+        .progress-bar {
+            width: 300px; height: 30px; background: #333; border-radius: 15px; overflow: hidden; margin: 20px 0;
+        }
+        .progress-fill {
+            height: 100%; background: linear-gradient(90deg, #3498db, #2ecc71); transition: width 0.3s;
+        }
+        
+        .header { background: #2c3e50; color: white; padding: 20px; text-align: center; }
+        .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
+        
+        .controls {
+            background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .control-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+        .control-group { flex: 1; min-width: 120px; }
+        label { display: block; font-weight: 600; color: #555; font-size: 12px; margin-bottom: 5px; text-transform: uppercase; }
+        select, input { width: 100%; padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        select:focus, input:focus { outline: none; border-color: #3498db; }
+        
+        .year-selector {
+            display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 15px;
+            padding: 10px; background: #f8f9fa; border-radius: 4px;
+        }
+        .year-btn {
+            padding: 4px 10px; background: white; border: 1px solid #ddd;
+            border-radius: 3px; cursor: pointer; font-size: 12px;
+            transition: all 0.2s;
+        }
+        .year-btn:hover { background: #e3f2fd; border-color: #3498db; }
+        .year-btn.active { background: #3498db; color: white; border-color: #3498db; }
+        
+        .btn {
+            padding: 8px 16px; background: #3498db; color: white;
+            border: none; border-radius: 4px; cursor: pointer;
+            font-weight: 600; text-transform: uppercase; font-size: 12px;
+        }
+        .btn:hover { background: #2980b9; }
+        
+        .stats {
+            background: #e9ecef; padding: 12px; border-radius: 4px;
+            display: flex; gap: 20px; font-size: 13px;
+        }
+        .stat-item { display: flex; align-items: center; gap: 5px; }
+        .stat-label { color: #666; }
+        .stat-value { font-weight: bold; color: #2c3e50; }
+        
+        .table-container {
+            background: white; border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            height: calc(100vh - 320px); overflow: hidden;
+        }
+        .table-header {
+            position: sticky; top: 0; z-index: 10;
+            background: #34495e;
+        }
+        .table-body {
+            height: calc(100% - 40px); overflow-y: auto;
+        }
+        
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            background: #34495e; color: white; padding: 10px 8px;
+            text-align: left; cursor: pointer; font-size: 13px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        th:hover { background: #2c3e50; }
+        td { padding: 8px; border-bottom: 1px solid #e0e0e0; font-size: 13px; }
+        tr:hover { background: #f5f5f5; }
+        
+        .corrected { color: #27ae60; font-size: 11px; margin-left: 3px; }
+        .no-narrative { opacity: 0.5; font-style: italic; }
+        .damage-0 { color: #95a5a6; }
+        .damage-1 { color: #3498db; }
+        .damage-2 { color: #9b59b6; }
+        .damage-3 { color: #e67e22; }
+        .damage-4 { color: #e74c3c; }
+        .damage-5 { color: #c0392b; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="loading" id="loading">
+        <h2>Loading Storm Data...</h2>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+        </div>
+        <div id="loadStatus">Initializing...</div>
+    </div>
+    
+    <div class="header">
+        <h1>Storm Events Database</h1>
+        <p>NOAA Historical Archive (1959-1992) • 199,327 Events</p>
+    </div>
+    
+    <div class="container">
+        <div class="controls">
+            <div style="margin-bottom: 5px; font-size: 11px; color: #666;">
+                Click to select a year • Ctrl/Cmd+Click to select multiple years
+            </div>
+            <div class="year-selector" id="yearSelector">
+                <button class="year-btn active" onclick="selectYear('')">All Years</button>
+            </div>
+            
+            <div class="control-row">
+                <div class="control-group">
+                    <label>Month</label>
+                    <select id="monthFilter">
+                        <option value="">All Months</option>
+                        <option value="1">January</option>
+                        <option value="2">February</option>
+                        <option value="3">March</option>
+                        <option value="4">April</option>
+                        <option value="5">May</option>
+                        <option value="6">June</option>
+                        <option value="7">July</option>
+                        <option value="8">August</option>
+                        <option value="9">September</option>
+                        <option value="10">October</option>
+                        <option value="11">November</option>
+                        <option value="12">December</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label>State</label>
+                    <select id="stateFilter">
+                        <option value="">All States</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label>Event Type</label>
+                    <select id="eventFilter">
+                        <option value="">All Events</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label>Search</label>
+                    <input type="text" id="searchFilter" placeholder="Search narratives...">
+                </div>
+                
+                <div class="control-group">
+                    <label>Narratives</label>
+                    <select id="narrativeFilter">
+                        <option value="">All</option>
+                        <option value="with">With Narratives</option>
+                        <option value="without">Without Narratives</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label>&nbsp;</label>
+                    <button class="btn" onclick="applyFilters()">Apply Filters</button>
+                </div>
+            </div>
+            
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="stat-label">Total:</span>
+                    <span class="stat-value" id="totalEvents">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Filtered:</span>
+                    <span class="stat-value" id="filteredEvents">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Displayed:</span>
+                    <span class="stat-value" id="displayedEvents">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Load Time:</span>
+                    <span class="stat-value" id="loadTime">0ms</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="table-container">
+            <div class="table-header">
+                <table>
+                    <thead>
+                        <tr>
+                            <th onclick="sortBy('year')" style="width: 100px">Date</th>
+                            <th onclick="sortBy('state')" style="width: 60px">State</th>
+                            <th onclick="sortBy('place')" style="width: 200px">Location</th>
+                            <th onclick="sortBy('event')" style="width: 150px">Event</th>
+                            <th onclick="sortBy('fatalities')" style="width: 60px">Fatal.</th>
+                            <th onclick="sortBy('injuries')" style="width: 60px">Inj.</th>
+                            <th onclick="sortBy('damage_property')" style="width: 80px">Prop. Dmg</th>
+                            <th onclick="sortBy('damage_crops')" style="width: 80px">Crop Dmg</th>
+                            <th onclick="sortBy('latitude')" style="width: 60px">Lat</th>
+                            <th onclick="sortBy('longitude')" style="width: 60px">Lon</th>
+                            <th>Narrative</th>
+                        </tr>
+                    </thead>
+                </table>
+            </div>
+            <div class="table-body" id="tableBody"></div>
+        </div>
+    </div>
+    
+    <script>
+        let allData = [];
+        let filteredData = [];
+        let currentSort = { field: null, asc: true };
+        let selectedYears = new Set();
+        
+        const damageScale = [
+            '$0', '<$50', '$50-500', '$500-5K', '$5K-50K',
+            '$50K-500K', '$500K-5M', '$5M-50M', '$50M-500M', '$500M-5B'
+        ];
+        
+        // Event category mapping from config.py
+        const EVENT_CATEGORIES = {
+            'TORNADO': 'Tornado',
+            'FUNNEL CLOUD': 'Funnel Cloud',
+            'WATERSPOUT': 'Waterspout',
+            'THUNDERSTORM WIND': 'Thunderstorm Wind',
+            'HAIL': 'Hail',
+            'HIGH WIND': 'High Wind',
+            'LIGHTNING': 'Lightning',
+            'HEAVY RAIN': 'Heavy Rain',
+            'FLASH FLOOD': 'Flash Flood',
+            'FLOOD': 'Flood',
+            'WINTER STORM': 'Winter Storm',
+            'ICE STORM': 'Ice Storm',
+            'HEAVY SNOW': 'Heavy Snow',
+            'BLIZZARD': 'Blizzard',
+            'DUST STORM': 'Dust Storm',
+            'DENSE FOG': 'Dense Fog',
+            'HEAT': 'Heat',
+            'DROUGHT': 'Drought',
+            'WILDFIRE': 'Wildfire',
+            'AVALANCHE': 'Avalanche'
+        };
+        
+        async function loadData() {
+            const startTime = performance.now();
+            const progressFill = document.getElementById('progressFill');
+            const loadStatus = document.getElementById('loadStatus');
+            
+            try {
+                // Load both parts
+                loadStatus.textContent = 'Loading part 1 of 2...';
+                progressFill.style.width = '25%';
+                
+                const [response1, response2] = await Promise.all([
+                    fetch('events_part1.json'),
+                    fetch('events_part2.json')
+                ]);
+                
+                loadStatus.textContent = 'Processing part 1...';
+                progressFill.style.width = '50%';
+                const data1 = await response1.json();
+                
+                loadStatus.textContent = 'Processing part 2...';
+                progressFill.style.width = '75%';
+                const data2 = await response2.json();
+                
+                // Combine data
+                allData = [...data1.events, ...data2.events];
+                
+                // Fix year and month from pdf_name if needed
+                allData.forEach(event => {
+                    if (event.year === 0 || !event.year) {
+                        if (event.pdf_name && event.pdf_name.includes('storm_')) {
+                            const parts = event.pdf_name.replace('.pdf', '').split('_');
+                            if (parts.length >= 3) {
+                                event.year = parseInt(parts[1]);
+                                event.month = parseInt(parts[2]);
+                            }
+                        }
+                    }
+                });
+                
+                loadStatus.textContent = 'Initializing interface...';
+                progressFill.style.width = '90%';
+                
+                // Initialize UI
+                initializeUI();
+                
+                progressFill.style.width = '100%';
+                const loadTime = performance.now() - startTime;
+                document.getElementById('loadTime').textContent = loadTime.toFixed(0) + 'ms';
+                
+                setTimeout(() => {
+                    document.getElementById('loading').classList.add('hidden');
+                }, 500);
+                
+            } catch (error) {
+                console.error('Error loading data:', error);
+                loadStatus.textContent = 'Error loading data!';
+            }
+        }
+        
+        function initializeUI() {
+            // Get unique years
+            const years = [...new Set(allData.map(e => e.year).filter(y => y))].sort();
+            const yearSelector = document.getElementById('yearSelector');
+            
+            // Add individual year buttons with multi-select capability
+            years.forEach(year => {
+                const btn = document.createElement('button');
+                btn.className = 'year-btn';
+                btn.dataset.year = year;
+                btn.textContent = year;
+                btn.onclick = (e) => {
+                    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                        // Multi-select mode
+                        toggleYear(year, true);
+                    } else {
+                        // Single select mode
+                        toggleYear(year, false);
+                    }
+                };
+                yearSelector.appendChild(btn);
+            });
+            
+            // Get unique states - split multi-state entries for the picker
+            const statesSet = new Set();
+            allData.forEach(item => {
+                const state = item.state_corrected || item.state_original || item.state;
+                if (state) {
+                    // Check if it's a multi-state entry
+                    if (state.includes(',') || state.includes('&') || state.includes('/')) {
+                        // Split by various delimiters and add individual states
+                        const parts = state.replace(/&/g, ',').replace(/\//g, ',').split(',');
+                        parts.forEach(part => {
+                            const clean = part.trim();
+                            if (clean && clean.length <= 3) {  // Likely a state code
+                                statesSet.add(clean);
+                            }
+                        });
+                    } else if (state.length <= 3) {
+                        // Single state
+                        statesSet.add(state.trim());
+                    }
+                }
+            });
+            
+            const states = [...statesSet].sort();
+            const stateFilter = document.getElementById('stateFilter');
+            states.forEach(state => {
+                const option = document.createElement('option');
+                option.value = state;
+                option.textContent = state;
+                stateFilter.appendChild(option);
+            });
+            
+            // Get unique events - normalize to uppercase
+            const eventsSet = new Set();
+            allData.forEach(item => {
+                const event = (item.event_corrected || item.event_original || item.event || '').toUpperCase();
+                if (event) eventsSet.add(event);
+            });
+            const events = [...eventsSet].sort();
+            
+            // Add to dropdown - simple list, no categories
+            const eventFilter = document.getElementById('eventFilter');
+            events.forEach(event => {
+                const option = document.createElement('option');
+                option.value = event;
+                option.textContent = event;
+                eventFilter.appendChild(option);
+            });
+            
+            // Update stats and apply initial filters
+            document.getElementById('totalEvents').textContent = allData.length.toLocaleString();
+            applyFilters();
+        }
+        
+        function toggleYear(year, multiSelect) {
+            if (year === '') {
+                // All years button clicked
+                selectedYears.clear();
+                document.querySelectorAll('.year-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.textContent === 'All Years');
+                });
+            } else {
+                if (multiSelect) {
+                    // Multi-select mode - toggle this year
+                    if (selectedYears.has(year)) {
+                        selectedYears.delete(year);
+                    } else {
+                        selectedYears.add(year);
+                    }
+                    // Clear "All Years" if selecting specific years
+                    if (selectedYears.size > 0) {
+                        document.querySelector('.year-btn.active[onclick*="\'\'"]')?.classList.remove('active');
+                    }
+                } else {
+                    // Single select mode - only this year
+                    selectedYears.clear();
+                    selectedYears.add(year);
+                }
+                
+                // Update button states
+                document.querySelectorAll('.year-btn').forEach(btn => {
+                    if (btn.textContent === 'All Years') {
+                        btn.classList.toggle('active', selectedYears.size === 0);
+                    } else {
+                        btn.classList.toggle('active', selectedYears.has(parseInt(btn.dataset.year)));
+                    }
+                });
+            }
+            applyFilters();
+        }
+        
+        function selectYear(year) {
+            // Backwards compatibility
+            toggleYear(year, false);
+        }
+        
+        function applyFilters() {
+            const month = document.getElementById('monthFilter').value;
+            const state = document.getElementById('stateFilter').value;
+            const event = document.getElementById('eventFilter').value;
+            const search = document.getElementById('searchFilter').value.toLowerCase();
+            const narrativeFilter = document.getElementById('narrativeFilter').value;
+            
+            filteredData = allData.filter(item => {
+                // Year filter - check if year is in selected set or if no years selected (all)
+                if (selectedYears.size > 0 && !selectedYears.has(item.year)) return false;
+                
+                // Month filter
+                if (month && item.month != month) return false;
+                
+                // State filter (check corrected, then original)
+                const itemState = item.state_corrected || item.state_original || item.state;
+                if (state) {
+                    // Check if the selected state matches exactly or is part of a multi-state entry
+                    if (itemState === state) {
+                        // Exact match
+                    } else if (itemState && (itemState.includes(',') || itemState.includes('&') || itemState.includes('/'))) {
+                        // Multi-state entry - check if selected state is one of them
+                        const parts = itemState.replace(/&/g, ',').replace(/\//g, ',').split(',');
+                        const cleanParts = parts.map(p => p.trim());
+                        if (!cleanParts.includes(state)) {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                
+                // Event filter (check corrected, then original) - normalize to uppercase
+                const itemEvent = (item.event_corrected || item.event_original || item.event || '').toUpperCase();
+                if (event && itemEvent !== event) return false;
+                
+                // Narrative filter
+                const hasNarrative = item.narrative && item.narrative.trim().length > 0;
+                if (narrativeFilter === 'with' && !hasNarrative) return false;
+                if (narrativeFilter === 'without' && hasNarrative) return false;
+                
+                // Search filter
+                if (search) {
+                    const searchableText = [
+                        item.narrative || '',
+                        item.place || '',
+                        itemState || '',
+                        itemEvent || ''
+                    ].join(' ').toLowerCase();
+                    if (!searchableText.includes(search)) return false;
+                }
+                
+                return true;
+            });
+            
+            document.getElementById('filteredEvents').textContent = filteredData.length.toLocaleString();
+            
+            if (currentSort.field) {
+                sortData();
+            }
+            
+            renderTable();
+        }
+        
+        function sortBy(field) {
+            if (currentSort.field === field) {
+                currentSort.asc = !currentSort.asc;
+            } else {
+                currentSort.field = field;
+                currentSort.asc = true;
+            }
+            sortData();
+            renderTable();
+        }
+        
+        function sortData() {
+            filteredData.sort((a, b) => {
+                let aVal = a[currentSort.field];
+                let bVal = b[currentSort.field];
+                
+                // Special handling for year (which is our date column)
+                if (currentSort.field === 'year') {
+                    // Create comparable dates from year, month, date
+                    aVal = new Date(a.year || 0, (a.month || 1) - 1, parseInt(a.date) || 1);
+                    bVal = new Date(b.year || 0, (b.month || 1) - 1, parseInt(b.date) || 1);
+                }
+                
+                // Handle nulls and undefined
+                if (aVal == null || aVal === undefined) aVal = '';
+                if (bVal == null || bVal === undefined) bVal = '';
+                
+                // Compare
+                if (aVal instanceof Date && bVal instanceof Date) {
+                    return currentSort.asc ? aVal - bVal : bVal - aVal;
+                } else if (typeof aVal === 'number' && typeof bVal === 'number') {
+                    return currentSort.asc ? aVal - bVal : bVal - aVal;
+                }
+                
+                const comparison = String(aVal).localeCompare(String(bVal));
+                return currentSort.asc ? comparison : -comparison;
+            });
+        }
+        
+        function renderTable() {
+            const maxRows = 1000; // Limit for performance
+            const displayData = filteredData.slice(0, maxRows);
+            
+            let html = '<table style="width: 100%">';
+            displayData.forEach(item => {
+                const state = item.state_corrected || item.state_original || item.state || '—';
+                const event = (item.event_corrected || item.event_original || item.event || '—').toUpperCase();
+                const stateCorrected = item.state_corrected ? '<span class="corrected">✓</span>' : '';
+                const eventCorrected = item.event_corrected ? '<span class="corrected">✓</span>' : '';
+                const hasNarrative = item.narrative && item.narrative.trim().length > 0;
+                const narrativeClass = hasNarrative ? '' : 'no-narrative';
+                
+                const propDmgClass = 'damage-' + Math.min(5, Math.floor((item.damage_property || 0) / 2));
+                const cropDmgClass = 'damage-' + Math.min(5, Math.floor((item.damage_crops || 0) / 2));
+                
+                html += `<tr>
+                    <td style="width: 100px">${item.year || '?'}-${String(item.month || '?').padStart(2, '0')}-${item.date || '??'}</td>
+                    <td style="width: 60px">${state}${stateCorrected}</td>
+                    <td style="width: 200px">${item.place || '—'}</td>
+                    <td style="width: 150px">${event}${eventCorrected}</td>
+                    <td style="width: 60px">${item.fatalities || 0}</td>
+                    <td style="width: 60px">${item.injuries || 0}</td>
+                    <td style="width: 80px" class="${propDmgClass}">${damageScale[item.damage_property] || '$0'}</td>
+                    <td style="width: 80px" class="${cropDmgClass}">${damageScale[item.damage_crops] || '$0'}</td>
+                    <td style="width: 60px">${item.latitude ? item.latitude.toFixed(2) : '—'}</td>
+                    <td style="width: 60px">${item.longitude ? item.longitude.toFixed(2) : '—'}</td>
+                    <td class="${narrativeClass}">${item.narrative || '<em>No narrative</em>'}</td>
+                </tr>`;
+            });
+            
+            if (filteredData.length > maxRows) {
+                html += `<tr>
+                    <td colspan="11" style="text-align: center; padding: 20px; background: #fffbf0;">
+                        Showing first ${maxRows.toLocaleString()} of ${filteredData.length.toLocaleString()} results.
+                        Please apply filters to see more.
+                    </td>
+                </tr>`;
+            }
+            
+            html += '</table>';
+            document.getElementById('tableBody').innerHTML = html;
+            document.getElementById('displayedEvents').textContent = displayData.length.toLocaleString();
+        }
+        
+        // Start loading immediately
+        loadData();
+    </script>
+</body>
+</html>
